@@ -20,15 +20,17 @@ CKPT_PATH = 'model.pth.tar'
 DATA_DIR = './data'
 BATCH_SIZE = 20
 EPOCHS = 25
+N_CLASSES = 2
 
 
 def main():
-
+    
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cudnn.benchmark = True
-
+    print("using", device)
     # initialize and load the model
-    model = DenseNet121(N_CLASSES).cuda()
-    model = torch.nn.DataParallel(model).cuda()
+    model = DenseNet121(N_CLASSES).to(device)
+    model = torch.nn.DataParallel(model).to(device)
 
     if os.path.isfile(CKPT_PATH):
         print("=> loading checkpoint")
@@ -57,25 +59,55 @@ def main():
                              shuffle=False, num_workers=2, pin_memory=True)
 
 
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    scheduler = lr_scheduler.StepLR(optimizer_ft, step_size=7, gamma=0.1)
+
+    
+    model = train_model(model, train_loader, criterion, optimizer, scheduler)
+
+    torch.save(model, "chexnet_t1.pth")
 
 
-def train_model(model, data_loader, epochs):
+def train_model(model, dataloader, criterion, optimizer, scheduler, num_epochs=25):
 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     for i in range(epochs):
         print('Epoch {}/{}'.format(epoch, num_epochs - 1))
         print('-' * 10)
         running_loss = 0.0
         running_corrects = 0
-    with torch.no_grad():
 
-
-        for inputs, labels in enumerate(data_loader):
+        for inputs, labels in enumerate(dataloader):
             inputs = inputs.to(device)
             labels = labels.to(device)
 
+            optimizer.zero_grad()
+
+            # forward + backward + optimize
+            outputs = model(inputs)
+            
+            _, preds = torch.max(outputs, 1)
+            loss = criterion(outputs, labels)
+            loss.backward()
+
+            optimizer.step()
+            scheduler.step()
+
+            # keep track of loss and correct
+            running_loss += loss.item() * inputs.size(0)
+            running_corrects += torch.sum(preds == labels.data)
 
 
+        epoch_loss = running_loss / dataset_sizes[phase]
+        epoch_acc = running_corrects.double() / dataset_sizes[phase]
+
+        print('{} Loss: {:.4f} Acc: {:.4f}'.format(
+            phase, epoch_loss, epoch_acc))
+
+
+    return model
 
 
 
